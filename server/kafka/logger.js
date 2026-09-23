@@ -1,4 +1,11 @@
-export const logMessage = async ({ groupId, topic, value }) => {
-  const prefix = groupId ? `[${groupId}] ` : '';
-  console.log(`${prefix}Consumed from ${topic}:`, value);
+export const logKafkaEvent = ({ groupId, topic, partition, offset, key, value }) => {
+  const timestamp = new Date().toISOString();
+  const groupTag = groupId ? `[${groupId}]` : '';
+  const keyTag = key ? `[Key: ${key}]` : '';
+  console.log(
+    `${timestamp} ${groupTag}${keyTag} Consumed from topic '${topic}' (part: ${partition}, offset: ${offset}):`,
+    value,
+  );
 };
+
+export const logMessage = logKafkaEvent;

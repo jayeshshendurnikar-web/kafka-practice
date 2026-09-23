@@ -6,9 +6,7 @@
   "scripts": {
     "dev": "node server.js",
     "start": "node server.js",
-    "postinstall": "node scripts/patch-kafkajs.js",
-    "test": "node --test test/*.test.js",
-    "test:integration": "node --test test/kafka.integration.js"
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

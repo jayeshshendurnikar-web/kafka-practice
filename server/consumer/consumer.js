@@ -1,14 +1,19 @@
 import { createKafkaConsumer, stopKafkaConsumer } from '../config/kafka.js';
 
 export const startConsumer = async (
-  handleMessage,
+  handler,
   { topic, groupId, fromBeginning = true } = {},
 ) => {
-  if (typeof handleMessage !== 'function') {
-    throw new TypeError('A message handler is required');
+  if (typeof handler !== 'function') {
+    throw new TypeError('Consumer message handler must be a function');
   }
+
   if (typeof topic !== 'string' || !topic.trim()) {
-    throw new TypeError('A non-empty topic is required');
+    throw new TypeError('Topic must be a non-empty string');
+  }
+
+  if (typeof groupId !== 'string' || !groupId.trim()) {
+    throw new TypeError('Consumer groupId must be a non-empty string');
   }
 
   const consumer = await createKafkaConsumer(groupId);
@@ -17,32 +22,46 @@ export const startConsumer = async (
 
   try {
     await consumer.subscribe({ topic, fromBeginning });
+
     const groupJoined = new Promise((resolve, reject) => {
-      timeoutId = setTimeout(() => reject(new Error('Kafka consumer group join timed out')), 30000);
+      timeoutId = setTimeout(() => {
+        reject(new Error(`Kafka consumer group join timed out for group '${groupId}'`));
+      }, 30000);
       removeGroupListener = consumer.on(consumer.events.GROUP_JOIN, resolve);
     });
 
     const running = consumer.run({
       eachMessage: async ({ topic: messageTopic, partition, message }) => {
         const rawValue = message.value?.toString() ?? '';
-        let value = rawValue;
+        let parsedValue = rawValue;
 
         try {
-          value = JSON.parse(rawValue);
+          parsedValue = JSON.parse(rawValue);
         } catch {
-          // Keep non-JSON messages readable for other producers.
+          // Keep string if not valid JSON
         }
 
-        await handleMessage({
+        const eventData = {
           groupId,
           topic: messageTopic,
           partition,
           offset: message.offset,
           key: message.key?.toString() ?? null,
-          value,
-        });
+          timestamp: message.timestamp,
+          value: parsedValue,
+        };
+
+        try {
+          await handler(eventData);
+        } catch (handlerError) {
+          console.error(
+            `Error in consumer handler for group '${groupId}' on topic '${messageTopic}':`,
+            handlerError,
+          );
+        }
       },
     });
+
     await Promise.all([running, groupJoined]);
     return consumer;
   } catch (error) {

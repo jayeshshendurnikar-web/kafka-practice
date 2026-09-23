@@ -1,19 +1,33 @@
 import { getKafkaProducer } from '../config/kafka.js';
 
-export const publishMessage = async (payload, { topic, key } = {}) => {
+export const publishEvent = async (topic, payload, { key = null, headers = {} } = {}) => {
   if (typeof topic !== 'string' || !topic.trim()) {
-    throw new TypeError('A non-empty topic is required');
+    throw new TypeError('Kafka topic must be a non-empty string');
+  }
+
+  if (payload === undefined || payload === null) {
+    throw new TypeError('Kafka event payload is required');
   }
 
   const value = typeof payload === 'string' ? payload : JSON.stringify(payload);
-  if (!value) {
-    throw new TypeError('Kafka message must have a value');
-  }
 
-  const metadata = await getKafkaProducer().send({
+  const message = {
+    value,
+    ...(key ? { key: String(key) } : {}),
+    ...(Object.keys(headers).length > 0 ? { headers } : {}),
+  };
+
+  const producer = getKafkaProducer();
+  const recordMetadata = await producer.send({
     topic,
-    messages: [{ value, ...(key == null ? {} : { key }) }],
+    messages: [message],
   });
 
-  return { topic, metadata };
+  return {
+    topic,
+    key,
+    metadata: recordMetadata,
+  };
 };
+
+export const publishMessage = (payload, options = {}) => publishEvent(options.topic, payload, options);

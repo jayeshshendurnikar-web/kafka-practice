@@ -1,83 +1,87 @@
-import express from "express";
-import cors from "cors";
-import { config } from "./config/index.js";
-import { connectDB, disconnectDB } from "./config/db.js";
-import { connectKafka, disconnectKafka, ensureKafkaTopics } from "./config/kafka.js";
-import { startConsumer } from "./consumer/consumer.js";
-
-import { logMessage } from "./consumer/messages.js";
-import { topics } from "./kafka/topics.js";
-import { groups } from "./kafka/groups.js";
-import { messagesRouter } from "./routes/messages.js";
-import { handleAnalytics } from './consumer/analytics.js';
+import express from 'express';
+import cors from 'cors';
+import { config } from './config/index.js';
+import { connectDB, disconnectDB } from './config/db.js';
+import { connectKafka, disconnectKafka, ensureKafkaTopics } from './config/kafka.js';
+import { topics } from './kafka/topics.js';
+import { startPaymentConsumer } from './consumer/paymentConsumer.js';
+import { startNotificationConsumer } from './consumer/notificationConsumer.js';
+import { ordersRouter } from './routes/orders.js';
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
-app.use("/api/messages", messagesRouter);
 
-app.get("/health", (req, res) => {
-  res.json({ status: "ok" });
+// API Routes
+app.use('/api/orders', ordersRouter);
+
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    service: 'order-management-service',
+    timestamp: new Date().toISOString(),
+  });
 });
 
 const startServer = async () => {
   try {
+    // 1. Connect MongoDB
     await connectDB();
 
+    // 2. Connect Kafka & ensure topics
     await connectKafka();
-    console.log("Connected to Kafka");
+    console.log('Connected to Kafka producer');
     await ensureKafkaTopics(Object.values(topics));
-    await startConsumer(logMessage, {
-      topic: topics.messages.name,
-      groupId: groups.messages,
-    });
+    console.log('Kafka topics verified / created:', Object.values(topics).map((t) => t.name));
 
-    await startConsumer(handleAnalytics, {
-      topic: topics.messages.name,
-      groupId: groups.analytics,
-    });
+    // 3. Start decoupled consumers
+    await startPaymentConsumer();
+    await startNotificationConsumer();
+    console.log('Order event consumers started successfully');
 
-    console.log("Kafka consumers started");
-
+    // 4. Start HTTP Server
     const server = await new Promise((resolve, reject) => {
       const listener = app.listen(config.port);
-      listener.once("error", reject);
-      listener.once("listening", () => {
-        listener.off("error", reject);
+      listener.once('error', reject);
+      listener.once('listening', () => {
+        listener.off('error', reject);
         resolve(listener);
       });
     });
-    console.log(`Server running on port ${config.port}`);
 
-    let shuttingDown = false;
-    const shutdown = async () => {
-      if (shuttingDown) return;
-      shuttingDown = true;
+    console.log(`🚀 Order Management Server running on port ${config.port}`);
+
+    // Graceful Shutdown
+    let isShuttingDown = false;
+    const shutdown = async (signal) => {
+      if (isShuttingDown) return;
+      isShuttingDown = true;
+      console.log(`\nReceived ${signal}. Initiating graceful shutdown...`);
 
       try {
         await new Promise((resolve, reject) => {
           server.close((error) => (error ? reject(error) : resolve()));
         });
+        console.log('HTTP server closed');
       } catch (error) {
-        console.error("HTTP server shutdown failed:", error);
-        process.exitCode = 1;
+        console.error('HTTP server close error:', error);
       }
 
       const results = await Promise.allSettled([disconnectKafka(), disconnectDB()]);
-
-      for (const result of results) {
-        if (result.status === "rejected") {
-          console.error("Shutdown failed:", result.reason);
-          process.exitCode = 1;
+      for (const res of results) {
+        if (res.status === 'rejected') {
+          console.error('Shutdown cleanup error:', res.reason);
         }
       }
+      console.log('Graceful shutdown completed');
+      process.exit(0);
     };
 
-    process.once("SIGINT", shutdown);
-    process.once("SIGTERM", shutdown);
+    process.once('SIGINT', () => shutdown('SIGINT'));
+    process.once('SIGTERM', () => shutdown('SIGTERM'));
   } catch (error) {
-    console.error("Server startup failed:", error.message);
+    console.error('Server startup failed:', error);
     await Promise.allSettled([disconnectKafka(), disconnectDB()]);
     process.exit(1);
   }
