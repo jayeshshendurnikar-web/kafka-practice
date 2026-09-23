@@ -5,13 +5,16 @@
   "main": "server.js",
   "scripts": {
     "dev": "node server.js",
-    "start": "node server.js"
+    "start": "node server.js",
+    "postinstall": "node scripts/patch-kafkajs.js",
+    "test": "node --test test/*.test.js",
+    "test:integration": "node --test test/kafka.integration.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
-    "kafkajs": "^2.2.4",
+    "kafkajs": "2.2.4",
     "mongoose": "^8.8.0"
   }
 }

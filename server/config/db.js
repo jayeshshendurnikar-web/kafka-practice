@@ -1,9 +1,8 @@
 import mongoose from 'mongoose';
-import dotenv from 'dotenv';
-dotenv.config();
+import { config } from './index.js';
 
 const getMongoDBConfig = () => ({
-  uri: process.env.MONGODB_URI,
+  uri: config.mongoUri,
   options: {
     maxPoolSize: 10,
     serverSelectionTimeoutMS: 5000,
@@ -44,6 +43,10 @@ export const connectDB = async () => {
   const startTime = new Date();
   const mongoConfig = getMongoDBConfig();
 
+  if (!mongoConfig.uri) {
+    throw new Error('Missing MONGODB_URI in environment variables');
+  }
+
   mongoose.connection.on('connected', () => {
     const endTime = new Date();
     console.log(
@@ -70,12 +73,11 @@ export const connectDB = async () => {
     await connectWithRetry(mongoConfig);
   } catch (error) {
     console.error('Failed to connect to MongoDB:', error.message);
-    process.exit(1);
+    throw error;
   }
 };
 export const disconnectDB = async () => {
   if (!mongoClient) {
-    console.log('No Mongo Clint for disconnect');
     return;
   }
   try {
