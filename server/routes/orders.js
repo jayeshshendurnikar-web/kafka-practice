@@ -5,19 +5,63 @@ export const ordersRouter = Router();
 
 // Create new order
 ordersRouter.post('/', async (req, res) => {
-  const { customer, items } = req.body || {};
+  const body = req.body || {};
 
-  if (!customer || !customer.name || !customer.email) {
+  // Support both nested { customer: { name, email } } and flat { name, email }
+  const customer = body.customer || {
+    name: body.name,
+    email: body.email,
+    phone: body.phone != null ? String(body.phone) : '',
+  };
+
+  const items = Array.isArray(body.items)
+    ? body.items
+    : body.item
+    ? [body.item]
+    : body.name && body.price
+    ? [{ productId: 'PROD-1', name: body.name, price: Number(body.price), quantity: 1 }]
+    : [];
+
+  if (!customer?.name || !customer?.email) {
     return res.status(400).json({
       status: 'error',
-      message: 'Customer name and email are required',
+      message: 'Customer name and email are required (e.g., inside customer: { name, email } or top-level)',
+      exampleBody: {
+        customer: {
+          name: 'Jayesh',
+          email: 'jayesh@example.com',
+          phone: '9876543210',
+        },
+        items: [
+          {
+            productId: 'P1',
+            name: 'Mechanical Keyboard',
+            price: 99.99,
+            quantity: 1,
+          },
+        ],
+      },
     });
   }
 
-  if (!Array.isArray(items) || items.length === 0) {
+  if (items.length === 0) {
     return res.status(400).json({
       status: 'error',
-      message: 'Order must contain at least one item',
+      message: 'Order must contain at least one item in the items array',
+      exampleBody: {
+        customer: {
+          name: customer.name,
+          email: customer.email,
+        },
+        items: [
+          {
+            productId: 'PROD-101',
+            name: 'Sample Item',
+            price: 50.0,
+            quantity: 1,
+          },
+        ],
+      },
     });
   }
 
