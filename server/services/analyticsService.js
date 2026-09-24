@@ -6,7 +6,8 @@ export const recordAnalyticsEvent = async (
   analytics = OrderAnalytics,
 ) => {
   if (typeof value?.orderId !== "string" || !value.orderId.trim()) {
-    throw new TypeError("Analytics event requires an orderId");
+    console.warn(`⚠️ [AnalyticsService] Skipping malformed message on topic '${topic}': missing valid orderId`);
+    return;
   }
   let update;
   if (topic === topics.orderCreated.name) {
@@ -25,10 +26,14 @@ export const recordAnalyticsEvent = async (
         : value.status === "PAID"
           ? "SUCCESS"
           : null);
-    if (!["SUCCESS", "FAILED"].includes(status))
-      throw new TypeError("Analytics payment outcome is invalid");
-    if (!Number.isFinite(value.totalAmount) || value.totalAmount < 0)
-      throw new TypeError("Analytics payment amount is invalid");
+    if (!["SUCCESS", "FAILED"].includes(status)) {
+      console.warn(`⚠️ [AnalyticsService] Skipping invalid payment outcome on order ${value.orderId}:`, status);
+      return;
+    }
+    if (!Number.isFinite(value.totalAmount) || value.totalAmount < 0) {
+      console.warn(`⚠️ [AnalyticsService] Skipping invalid payment amount on order ${value.orderId}:`, value.totalAmount);
+      return;
+    }
     update = {
       payment: {
         status,
@@ -37,13 +42,16 @@ export const recordAnalyticsEvent = async (
       },
     };
   } else if (topic === topics.notificationSent.name) {
-    if (value.status !== "SENT")
-      throw new TypeError("Analytics notification must be sent");
+    if (value.status !== "SENT") {
+      console.warn(`⚠️ [AnalyticsService] Skipping unsent notification on order ${value.orderId}:`, value.status);
+      return;
+    }
     update = {
       notification: { sent: true, type: value.type, sentAt: value.sentAt },
     };
   } else {
-    throw new TypeError(`Unsupported analytics topic: ${topic}`);
+    console.warn(`⚠️ [AnalyticsService] Unsupported topic: ${topic}`);
+    return;
   }
 
   // Upsert stage facts, not counters: repeats are harmless and topics may arrive in any order.
@@ -63,6 +71,12 @@ export const recordAnalyticsEvent = async (
       { runValidators: true },
     );
   }
+
+  console.log(`\n📊 ==================== [4. ANALYTICS SERVICE: RECORDED] ====================`);
+  console.log(`Order ID   : ${value.orderId}`);
+  console.log(`Topic      : ${topic}`);
+  console.log(`Action     : Updated live stage metrics in MongoDB OrderAnalytics`);
+  console.log(`==============================================================================\n`);
 };
 
 const countWhen = (condition) => ({ $sum: { $cond: [condition, 1, 0] } });

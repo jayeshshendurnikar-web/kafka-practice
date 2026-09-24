@@ -57,10 +57,10 @@ export const startConsumer = async (
           await handler(eventData);
         } catch (handlerError) {
           console.error(
-            `Error in consumer handler for group '${groupId}' on topic '${messageTopic}':`,
+            `❌ Error in consumer handler for group '${groupId}' on topic '${messageTopic}' (offset: ${message.offset}):`,
             handlerError,
           );
-          throw handlerError;
+          // Do not crash the entire consumer runner on a single malformed message
         }
       },
     });
