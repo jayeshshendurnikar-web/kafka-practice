@@ -66,7 +66,7 @@ ordersRouter.post('/', async (req, res) => {
   }
 
   try {
-    const order = await createOrder({ customer, items });
+    const order = await createOrder({ customer, items, paymentApproved: body.paymentApproved });
     return res.status(201).json({
       status: 'success',
       message: 'Order created and payment processing initiated',
@@ -74,7 +74,7 @@ ordersRouter.post('/', async (req, res) => {
     });
   } catch (error) {
     console.error('[OrdersRoute] Failed to create order:', error);
-    return res.status(500).json({
+    return res.status(error instanceof TypeError || error.name === 'ValidationError' ? 400 : 500).json({
       status: 'error',
       message: error.message || 'Internal server error while creating order',
     });

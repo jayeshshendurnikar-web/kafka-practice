@@ -1,60 +1,60 @@
+import { randomUUID } from 'node:crypto';
 import { Order } from '../models/Order.js';
 import { publishEvent } from '../producer/producer.js';
 import { topics } from '../kafka/topics.js';
 
-export const processFakePayment = async (orderData) => {
-  const { orderId, totalAmount, customer } = orderData || {};
+export const createPaymentProcessor = ({ orders = Order, publish = publishEvent } = {}) => async (orderData) => {
+  const { orderId } = orderData || {};
+  if (!orderId) throw new TypeError('Payment event requires an orderId');
 
-  if (!orderId) {
-    console.warn('[PaymentService] Skipped processing: missing orderId');
-    return null;
-  }
-
-  console.log(`[PaymentService] Processing fake payment for Order: ${orderId}, Amount: $${totalAmount}`);
-
-  // Simulate payment processing latency (e.g., 300ms)
-  await new Promise((resolve) => setTimeout(resolve, 300));
-
-  const transactionId = `TXN-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
-  const paidAt = new Date();
-
-  // Update order in MongoDB
-  const updatedOrder = await Order.findOneAndUpdate(
-    { orderId },
-    {
-      $set: {
-        status: 'PAID',
-        payment: {
-          transactionId,
-          status: 'SUCCESS',
-          amount: totalAmount,
-          paidAt,
-        },
-      },
-    },
+  // Use the persisted choice and amount; replay must not change a payment result.
+  const order = await orders.findOne({ orderId }).lean();
+  if (!order) throw new Error(`Payment order not found: ${orderId}`);
+  const approved = order.paymentApproved !== false;
+  const processedAt = new Date();
+  const payment = {
+    status: approved ? 'SUCCESS' : 'FAILED',
+    amount: order.totalAmount,
+    processedAt,
+    ...(approved
+      ? { transactionId: `TXN-${randomUUID()}`, paidAt: processedAt }
+      : { failureReason: 'Payment declined: you selected No. No money was charged.' }),
+  };
+  const updated = await orders.findOneAndUpdate(
+    { orderId, payment: null },
+    { $set: { status: approved ? 'PAID' : 'PAYMENT_FAILED', payment } },
     { new: true },
-  ).lean();
+  ).lean() || await orders.findOne({ orderId }).lean();
+  if (!updated?.payment) throw new Error(`Payment result missing for ${orderId}`);
 
-  if (!updatedOrder) {
-    console.error(`[PaymentService] Order not found in database: ${orderId}`);
-    return null;
-  }
-
-  console.log(`[PaymentService] Fake payment successful for Order: ${orderId}. Txn: ${transactionId}`);
-
-  // Publish payment-processed event to Kafka
+  const result = updated.payment;
   const paymentEvent = {
     orderId,
-    transactionId,
-    totalAmount,
-    customer,
-    status: 'PAID',
-    paidAt,
+    customer: updated.customer,
+    totalAmount: updated.totalAmount,
+    status: result.status === 'FAILED' ? 'PAYMENT_FAILED' : 'PAID',
+    paymentStatus: result.status,
+    transactionId: result.transactionId,
+    paidAt: result.paidAt,
+    processedAt: result.processedAt,
+    failureReason: result.failureReason,
   };
 
-  await publishEvent(topics.paymentProcessed.name, paymentEvent, {
-    key: orderId,
-  });
+  console.log(`\n💳 ==================== [2. PAYMENT SERVICE: PROCESSED] ====================`);
+  console.log(`Order ID   : ${orderId}`);
+  console.log(`Amount     : $${updated.totalAmount}`);
+  console.log(`Status     : ${result.status === 'SUCCESS' ? '✅ SUCCESS (Paid)' : '❌ DECLINED (Failed)'}`);
+  if (result.status === 'SUCCESS') {
+    console.log(`Txn ID     : ${result.transactionId}`);
+  } else {
+    console.log(`Reason     : ${result.failureReason}`);
+  }
+  console.log(`Kafka Event: Firing '${topics.paymentProcessed.name}' with key '${orderId}'...`);
+  console.log(`============================================================================\n`);
 
+  // Both outcomes reach the notification consumer. Republish on retry if a previous send failed.
+  await publish(topics.paymentProcessed.name, paymentEvent, { key: orderId });
   return paymentEvent;
 };
+
+export const processFakePayment = createPaymentProcessor();

@@ -15,19 +15,26 @@ export const calculateTotal = (items) => {
   return items.reduce((sum, item) => {
     const price = Number(item.price);
     const quantity = item.quantity === undefined ? 1 : Number(item.quantity);
-    if (isNaN(price) || price < 0 || isNaN(quantity) || quantity <= 0) {
+    if (!Number.isFinite(price) || price < 0 || !Number.isInteger(quantity) || quantity <= 0) {
       throw new TypeError('Each item must have a valid non-negative price and positive quantity');
     }
     return sum + price * quantity;
   }, 0);
 };
 
-export const createOrder = async ({ customer, items }) => {
-  if (!customer?.name || !customer?.email) {
+export const createOrder = async ({ customer, items, paymentApproved = true }) => {
+  if (typeof customer?.name !== 'string' || !customer.name.trim() ||
+      typeof customer?.email !== 'string' || !customer.email.trim()) {
     throw new TypeError('Customer name and email are required');
+  }
+  if (typeof paymentApproved !== 'boolean') {
+    throw new TypeError('paymentApproved must be true (Yes) or false (No)');
   }
 
   const totalAmount = calculateTotal(items);
+  if (!Number.isFinite(totalAmount) || items.some((item) => typeof item.name !== 'string' || !item.name.trim())) {
+    throw new TypeError('Each item must have a name and the order total must be finite');
+  }
   const orderId = generateOrderId();
 
   const newOrder = await Order.create({
@@ -35,7 +42,7 @@ export const createOrder = async ({ customer, items }) => {
     customer: {
       name: customer.name.trim(),
       email: customer.email.trim(),
-      phone: customer.phone ? customer.phone.trim() : '',
+      phone: customer.phone ? String(customer.phone).trim() : '',
     },
     items: items.map((item) => ({
       productId: String(item.productId || item.id || `PROD-${Math.random().toString(36).substring(7)}`),
@@ -45,6 +52,7 @@ export const createOrder = async ({ customer, items }) => {
     })),
     totalAmount,
     status: 'PENDING',
+    paymentApproved,
   });
 
   const eventPayload = {
@@ -54,14 +62,23 @@ export const createOrder = async ({ customer, items }) => {
     totalAmount: newOrder.totalAmount,
     status: newOrder.status,
     createdAt: newOrder.createdAt,
+    paymentApproved: newOrder.paymentApproved,
   };
+
+  console.log(`\n📦 ==================== [1. ORDER SERVICE: ORDER CREATED] ====================`);
+  console.log(`Order ID   : ${newOrder.orderId}`);
+  console.log(`Customer   : ${newOrder.customer.name} (${newOrder.customer.email})`);
+  console.log(`Total      : $${totalAmount.toFixed(2)}`);
+  console.log(`Items (${newOrder.items.length})  : ${newOrder.items.map((i) => `${i.name} (x${i.quantity})`).join(', ')}`);
+  console.log(`Payment App: ${newOrder.paymentApproved ? 'Approved by user' : 'Declined by user'}`);
+  console.log(`Kafka Event: Firing '${topics.orderCreated.name}' with key '${newOrder.orderId}'...`);
+  console.log(`============================================================================\n`);
 
   // Publish event to Kafka with orderId as key for partition ordering
   await publishEvent(topics.orderCreated.name, eventPayload, {
     key: newOrder.orderId,
   });
 
-  console.log(`[OrderService] Order created & published to Kafka: ${newOrder.orderId} (Amount: $${totalAmount})`);
   return newOrder;
 };
 

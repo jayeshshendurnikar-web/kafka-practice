@@ -7,6 +7,9 @@ import { topics } from './kafka/topics.js';
 import { startPaymentConsumer } from './consumer/paymentConsumer.js';
 import { startNotificationConsumer } from './consumer/notificationConsumer.js';
 import { ordersRouter } from './routes/orders.js';
+import { analyticsRouter } from './routes/analytics.js';
+import { startAnalyticsConsumer } from './consumer/analyticsConsumer.js';
+import { OrderAnalytics } from './models/OrderAnalytics.js';
 
 const app = express();
 
@@ -15,6 +18,7 @@ app.use(express.json());
 
 // API Routes
 app.use('/api/orders', ordersRouter);
+app.use('/api/analytics', analyticsRouter);
 
 app.get('/health', (req, res) => {
   res.json({
@@ -28,6 +32,7 @@ const startServer = async () => {
   try {
     // 1. Connect MongoDB
     await connectDB();
+    await OrderAnalytics.init();
 
     // 2. Connect Kafka & ensure topics
     await connectKafka();
@@ -35,10 +40,15 @@ const startServer = async () => {
     await ensureKafkaTopics(Object.values(topics));
     console.log('Kafka topics verified / created:', Object.values(topics).map((t) => t.name));
 
-    // 3. Start decoupled consumers
-    await startPaymentConsumer();
-    await startNotificationConsumer();
-    console.log('Order event consumers started successfully');
+    // 3. Start decoupled consumers (Skip if running in Producer/API-only mode)
+    if (process.env.START_CONSUMERS !== 'false') {
+      await startPaymentConsumer();
+      await startNotificationConsumer();
+      await startAnalyticsConsumer();
+      console.log('Order event consumers started successfully');
+    } else {
+      console.log('⚡ [PRODUCER MODE] Running Express API only. Consumers run in their own terminal.');
+    }
 
     // 4. Start HTTP Server
     const server = await new Promise((resolve, reject) => {

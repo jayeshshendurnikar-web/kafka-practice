@@ -23,6 +23,13 @@ export const publishEvent = async (topic, payload, { key = null, headers = {} } 
     messages: [message],
   });
 
+  console.log('\n=================== 📤 [PRODUCER] EVENT FIRED TO KAFKA ===================');
+  console.log(`Topic    : ${topic}`);
+  console.log(`Key      : ${key}`);
+  console.log('Payload  :');
+  console.log(typeof payload === 'object' ? JSON.stringify(payload, null, 2) : payload);
+  console.log('==========================================================================\n');
+
   return {
     topic,
     key,

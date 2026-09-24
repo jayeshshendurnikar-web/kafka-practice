@@ -2,14 +2,16 @@ import { createKafkaConsumer, stopKafkaConsumer } from '../config/kafka.js';
 
 export const startConsumer = async (
   handler,
-  { topic, groupId, fromBeginning = true } = {},
+  { topic, topics: subscribedTopics, groupId, fromBeginning = true } = {},
 ) => {
   if (typeof handler !== 'function') {
     throw new TypeError('Consumer message handler must be a function');
   }
 
-  if (typeof topic !== 'string' || !topic.trim()) {
-    throw new TypeError('Topic must be a non-empty string');
+  const topicNames = subscribedTopics ?? [topic];
+  if (!Array.isArray(topicNames) || topicNames.length === 0 ||
+      topicNames.some((name) => typeof name !== 'string' || !name.trim())) {
+    throw new TypeError('Provide a non-empty topic or topics array');
   }
 
   if (typeof groupId !== 'string' || !groupId.trim()) {
@@ -21,7 +23,7 @@ export const startConsumer = async (
   let removeGroupListener;
 
   try {
-    await consumer.subscribe({ topic, fromBeginning });
+    await consumer.subscribe({ topics: topicNames, fromBeginning });
 
     const groupJoined = new Promise((resolve, reject) => {
       timeoutId = setTimeout(() => {
@@ -58,6 +60,7 @@ export const startConsumer = async (
             `Error in consumer handler for group '${groupId}' on topic '${messageTopic}':`,
             handlerError,
           );
+          throw handlerError;
         }
       },
     });

@@ -25,6 +25,7 @@ const paymentDetailsSchema = new mongoose.Schema(
     status: { type: String, enum: ['SUCCESS', 'FAILED'], default: 'SUCCESS' },
     amount: { type: Number },
     paidAt: { type: Date },
+    processedAt: { type: Date },
     failureReason: { type: String },
   },
   { _id: false },
@@ -36,6 +37,8 @@ const notificationDetailsSchema = new mongoose.Schema(
     channel: { type: String, enum: ['EMAIL', 'SMS'], default: 'EMAIL' },
     sentAt: { type: Date },
     recipient: { type: String },
+    type: { type: String, enum: ['PAYMENT_SUCCESS', 'PAYMENT_FAILED'] },
+    message: { type: String },
   },
   { _id: false },
 );
@@ -76,6 +79,7 @@ const orderSchema = new mongoose.Schema(
       type: paymentDetailsSchema,
       default: null,
     },
+    paymentApproved: { type: Boolean, default: true },
     notification: {
       type: notificationDetailsSchema,
       default: () => ({ sent: false, channel: 'EMAIL' }),
